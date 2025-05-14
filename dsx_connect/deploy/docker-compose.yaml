@@ -1,0 +1,47 @@
+services:
+  dsx_connect_core:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8586:8586"
+    environment:
+      - PYTHONUNBUFFERED=1
+      - DSXCONNECT__DATABASE__TYPE=tinydb
+      - DSXCONNECT__DATABASE__LOC=data/dsx-connect.db.json
+      - DSXCONNECT__DATABASE__RETAIN=100
+      - DSXCONNECT__SCANNER__SCAN_BINARY_URL=http://a668960fee4324868b4154722ad9a909-856481437.us-east-1.elb.amazonaws.com/scan/binary/v2
+      - LOG_LEVEL=debug
+    depends_on:
+      - redis
+    networks:
+      dsx-network:
+        aliases:
+          - dsx-connect-api # this is the name connectors will use to connect to the dsx_connect_core service API on the dsx-connect-network docker network
+    command: uvicorn dsx_connect.app.dsx_connect_app:app --host 0.0.0.0 --port 8586
+
+  dsx_connect_workers:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      - PYTHONUNBUFFERED=1
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+    depends_on:
+      - redis
+    networks:
+      - dsx-network
+    command: celery -A dsx_connect.taskqueue.celery_app worker --loglevel=info -Q scan_request_queue,verdict_action_queue,scan_result_queue --concurrency=1
+
+  redis:
+    image: redis:6
+    networks:
+      - dsx-network
+
+# The following assumes an already created docker network like this:
+# docker network create dsx-connect-network --driver bridge
+networks:
+  dsx-network:
+    external: true
+    name: dsx-connect-network  # change this to an existing docker network
