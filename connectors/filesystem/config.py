@@ -29,9 +29,9 @@ class FilesystemConnectorConfig(BaseSettings):
     test_mode: bool = True
 
     ## Config settings specific to this Connector
-
     location: pathlib.Path = Field(default=pathlib.Path("/Users/logangilbert/Documents/SAMPLES/PDF"),
                                    description="Directory to scan for files")
+    monitor: bool = False # if true, Connector will monitor location for new or modified files.
     scan_existing: bool = Field(default=False, description="If True, scan existing files in location on startup")
     recursive: bool = Field(default=True, description="If True, scan subdirectories recursively")
     item_action_move_dir: pathlib.Path = Field(default=pathlib.Path("/Users/logangilbert/Documents/SAMPLES/quarantine"),
@@ -50,4 +50,23 @@ class FilesystemConnectorConfig(BaseSettings):
         extra = "forbid"
 
 
-config = FilesystemConnectorConfig()
+
+# Singleton with reload capability
+class ConfigManager:
+    _config: FilesystemConnectorConfig = None
+
+    @classmethod
+    def get_config(cls) -> FilesystemConnectorConfig:
+        if cls._config is None:
+            cls._config = FilesystemConnectorConfig()
+        return cls._config
+
+    @classmethod
+    def reload_config(cls) -> FilesystemConnectorConfig:
+        cls._config = FilesystemConnectorConfig()
+        return cls._config
+
+
+config = ConfigManager.get_config()
+
+

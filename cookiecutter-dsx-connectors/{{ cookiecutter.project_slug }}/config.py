@@ -1,5 +1,5 @@
 from pydantic import HttpUrl, Field
-
+from pydantic_settings import BaseSettings
 from dsx_connect.models.connector_models import ItemActionEnum
 
 class {{ cookiecutter.__package_config_class_name }}(BaseSettings):
@@ -17,11 +17,11 @@ class {{ cookiecutter.__package_config_class_name }}(BaseSettings):
 
     You can also read in an optional .env file, which will be ignored is not available
     """
-    name: str = '{{ cookiecutter.project_slug }}'
+    name: str = '{{ cookiecutter.__release_name }}'
     connector_url: HttpUrl = Field(default="http://0.0.0.0:{{ cookiecutter.connector_port }}",
                                    description="Base URL (http(s)://ip.add.ddr.ess|URL:port) of this connector entry point")
     item_action: ItemActionEnum = ItemActionEnum.NOTHING
-    dsx_connect_url: HttpUrl = Field(default="{{ cookiecutter.dsx_connect_url }}",
+    dsx_connect_url: HttpUrl = Field(default="{{ cookiecutter.__dsx_connect_url }}",
                                      description="Complete URL (http(s)://ip.add.ddr.ess|URL:port) of the dsxa entry point")
     test_mode: bool = True
 
@@ -32,3 +32,22 @@ class {{ cookiecutter.__package_config_class_name }}(BaseSettings):
         env_file = ".env"
         env_file_encoding = "utf-8"
         extra = "forbid"
+
+# Singleton with reload capability
+class ConfigManager:
+    _config: {{ cookiecutter.__package_config_class_name }} = None
+
+    @classmethod
+    def get_config(cls) -> {{ cookiecutter.__package_config_class_name }}:
+        if cls._config is None:
+            cls._config = {{ cookiecutter.__package_config_class_name }}()
+        return cls._config
+
+    @classmethod
+    def reload_config(cls) -> {{ cookiecutter.__package_config_class_name }}:
+        cls._config = {{ cookiecutter.__package_config_class_name }}()
+        return cls._config
+
+
+config = ConfigManager.get_config()
+

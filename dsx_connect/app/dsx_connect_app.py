@@ -13,7 +13,7 @@ from dsx_connect.utils.logging import dsx_logging
 
 from dsx_connect.app.dependencies import static_path
 
-from dsx_connect.app.routers import scan_request, scan_request_test
+from dsx_connect.app.routers import scan_request, scan_request_test, scan_results
 
 from dsx_connect import version
 
@@ -45,6 +45,7 @@ app.mount("/static", StaticFiles(directory=static_path, html=True), name='static
 
 app.include_router(scan_request_test.router, tags=["test"])
 app.include_router(scan_request.router, tags=["scan"])
+app.include_router(scan_results.router, tags=["results"])
 
 
 

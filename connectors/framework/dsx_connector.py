@@ -3,7 +3,7 @@ from httpx import HTTPStatusError
 from requests.exceptions import RequestException, HTTPError, Timeout, ConnectionError
 
 from fastapi import FastAPI, APIRouter, Request, BackgroundTasks
-from typing import Callable
+from typing import Callable, Awaitable
 
 from starlette.responses import StreamingResponse
 
@@ -37,14 +37,14 @@ class DSXConnector:
         )
         connector_api.include_router(DSXAConnectorRouter(self))
 
-        self.startup_handler: Callable[[], bool] = None
-        self.shutdown_handler: Callable[[], bool] = None
+        self.startup_handler: Callable[[], Awaitable[None]] = None
+        self.shutdown_handler: Callable[[], Awaitable[None]] = None
 
         self.full_scan_handler: Callable[[ScanRequestModel], StatusResponse] = None
         self.item_action_handler: Callable[[ScanRequestModel], StatusResponse] = None
         self.read_file_handler: Callable[[ScanRequestModel], StreamingResponse | StatusResponse] = None
         self.webhook_handler: Callable[[ScanRequestModel], StatusResponse] = None
-        self.repo_check_connection_handler: Callable[[], bool] = None
+        self.repo_check_connection_handler: Callable[[], StatusResponse] = None
 
     # Register handlers for startup and shutdown events
     def startup(self, func: Callable[[], bool]):
@@ -176,6 +176,11 @@ class DSXAConnectorRouter(APIRouter):
                   response_description='',
                   response_model=None)(self.post_read_file)
 
+        self.post(f'/{self._connector.connector_id}{ConnectorEndpoints.REPO_CHECK}',
+                  description='Check connectivity to repository',
+                  response_description='',
+                  response_model=None)(self.post_repo_check)
+
         self.post(f'/{self._connector.connector_id}{ConnectorEndpoints.WEBHOOK_EVENT}')(self.post_handle_webhook_event)
 
         # Register FastAPI events
@@ -190,7 +195,7 @@ class DSXAConnectorRouter(APIRouter):
             return self._connector.item_action_handler(scan_request_info)
         return StatusResponse(status=StatusResponseEnum.ERROR,
                               message="No handler registered for quarantine_action",
-                              description="Add a decorator (ex: @connector.item_action) to handle item_action events")
+                              description="Add a decorator (ex: @connector.item_action) to handle item_action requests")
 
     async def post_full_scan(self, background_tasks: BackgroundTasks) -> StatusResponse:
         if self._connector.full_scan_handler:
@@ -202,7 +207,7 @@ class DSXAConnectorRouter(APIRouter):
             )
         return StatusResponse(status=StatusResponseEnum.ERROR,
                               message="No handler registered for full_scan",
-                              description="Add a decorator (ex: @connector.full_scan) to handle full scan events")
+                              description="Add a decorator (ex: @connector.full_scan) to handle full scan requests")
 
     async def post_read_file(self, scan_request_info: ScanRequestModel) -> StreamingResponse | StatusResponse:
         dsx_logging.info(f'Receive read_file request for {scan_request_info}')
@@ -210,7 +215,14 @@ class DSXAConnectorRouter(APIRouter):
             return self._connector.read_file_handler(scan_request_info)
         return StatusResponse(status=StatusResponseEnum.ERROR,
                               message="No event handler registered for read_file",
-                              description="Add a decorator (ex: @connector.read_file) to handle quarantine_action events")
+                              description="Add a decorator (ex: @connector.read_file) to handle read file requests")
+
+    async def post_repo_check(self) -> StatusResponse:
+        if self._connector.repo_check_connection_handler:
+            return self._connector.repo_check_connection_handler()
+        return StatusResponse(status=StatusResponseEnum.ERROR,
+                              message="No event handler registered for repo_check",
+                              description="Add a decorator (ex: @connector.repo_check) to handle repo check requests")
 
     async def post_handle_webhook_event(self, request: Request):
         if self._connector.webhook_handler:

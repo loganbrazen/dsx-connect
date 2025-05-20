@@ -1,28 +1,30 @@
-# Filesystem Connector
+# {{ cookiecutter.project_name }}
 
-This project implements a Filesystem Connector based on the DSX-Connector framework.
+{{ cookiecutter.project_short_description }}
 
 ## Overview
 
-This connector provides the following endpoints:
-- **Startup/Shutdown:** Initialize and clean up resources.
-- **full_scan:** Perform a full repository scan.
-- **item_action:** Execute remediation actions.
-- **read_file:** Retrieve file contents.
-- **repo_check:** Checks on status of connectivity to repository.
-- **webhook_event:** Process external webhook events.
+This connector provides and integration for DSX-Connect with a {{ cookiecutter.repository }}.  When this
+connector is running, you can get the status of the connector from its home page, typically:
+```http request
+{{ cookiecutter.__base_connector_url }}
+```
 
-Running the connector and navigating to its Swagger page 
+and the API that it serves can be accessed via:
+
+```http request
+{{ cookiecutter.__base_connector_url }}/docs
+```
 
 ## Deploying Filesystem Connector
 ### Docker Compose
-This package contains an easy to use docker-compose.yaml file for configuration and deployment of the 
+This package contains an easy to use docker-compose.yaml file for configuration and deployment of the
 Filesystem Connector in a docker environment.
 
 #### Config via docker-compose
 
-The first part that should be changed, the ports this service listens on (optional), and a 
-volume definition.  For the Filesystem Connector you are mounting the folder that you want to 
+The first part that should be changed, the ports this service listens on (optional), and a
+volume definition.  For the Filesystem Connector you are mounting the folder that you want to
 scan external to the docker environment, and what that maps to within the connector.
 
 ##### Port and Volume Maps
@@ -43,10 +45,10 @@ and IDE friendly development.  Pydantic also has convenient built-in functions s
 can override default settings with .env files or environment settings (among other mechanisms), which is a preferred
 method to configure docker containers deployed in dockers or kubernetes.
 
-While the config.py file defines all fo the defaults, you probably don't want to edit these directly in the 
+While the config.py file defines all fo the defaults, you probably don't want to edit these directly in the
 python script unless you want to permanently change the defaults settings.
 
-To configure this connector (and override config.py defaults), you simply set name=value environment settings by 
+To configure this connector (and override config.py defaults), you simply set name=value environment settings by
 specifying DSXCONNECTOR_<NAME_OF_SETTING>=<value> (note all CAPS)
 
 ```yaml
@@ -63,8 +65,8 @@ specifying DSXCONNECTOR_<NAME_OF_SETTING>=<value> (note all CAPS)
 ```
 
 ##### Networking
-The remainder is configuration of this service, and the docker network this connector shares with 
-DSX Connect.  The external name of the dsx-network below should be the same as the network 
+The remainder is configuration of this service, and the docker network this connector shares with
+DSX Connect.  The external name of the dsx-network below should be the same as the network
 DSX Connect uses, if deployed within the same docker environment.
 
 ```yaml
@@ -85,7 +87,7 @@ networks:
     name: dsx-connect-network  # change this to an existing docker network
 ```
 #### Deployment
-Run docker compose from the same directoy as the docker-compose.yaml file using 
+Run docker compose from the same directoy as the docker-compose.yaml file using
 up command (-d to detach from execution)
 ```shell
 docker-compose up -d

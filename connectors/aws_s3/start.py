@@ -11,14 +11,15 @@ def get_random_port():
         return port
 
 if __name__ == "__main__":
-    # Import {{ cookiecutter.project_slug }} to register decorators
-    import connectors.filesystem.filesystem_connector  # noqa: F401
+    # Import aws_s3 to register decorators
+    import connectors.aws_s3.aws_s3_connector  # noqa: F401
 
     # Now import connector_api, which includes filesystem_connector's handlers
     from connectors.framework.dsx_connector import connector_api
 
-    port = get_random_port()
-    os.environ["PORT"] = str(port)
-    dsx_logging.info(f"Starting Filesystem Connector FastAPI app on port {port}")
+    # port = get_random_port()
+    port = 8591
+    # os.environ["PORT"] = str(port)
+    dsx_logging.info(f"Starting AWS S3 Connector FastAPI app on port {port}")
 
     uvicorn.run(connector_api, host="0.0.0.0", port=port, reload=False, workers=1)

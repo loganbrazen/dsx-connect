@@ -1,7 +1,7 @@
 from pymongo import MongoClient
 import json
 
-from scan_results_base_db import ScanResultsBaseDB
+from dsx_connect.database.scan_results_base_db import ScanResultsBaseDB
 from dsx_connect.models.scan_models import ScanResultModel
 
 

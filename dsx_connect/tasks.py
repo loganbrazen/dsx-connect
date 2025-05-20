@@ -77,7 +77,6 @@ def prepare(c):
     c.run(f"rsync -av --exclude '__pycache__' utils/ {export_folder}/dsx_connect/utils/")
     c.run(f"rsync -av --exclude '__pycache__' dsxa_client/ {export_folder}/dsx_connect/dsxa_client/")
     c.run(f"rsync -av --exclude '__pycache__' config.py {export_folder}/dsx_connect/")
-    c.run(f"rsync -av --exclude '__pycache__' ../utils/ {export_folder}/utils/")
 
     # move docker files to topmost directory for building
     c.run(f"cp deploy/Dockerfile {export_folder}/")

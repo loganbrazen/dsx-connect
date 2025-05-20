@@ -7,9 +7,9 @@ This project implements a DSX Connector based on the DSX Connector framework.
 
 
 ## Development and Debugging
-You should implement the following in `{{ cookiecutter.project_slug }}.py`.
-
+Implement the following in `{{ cookiecutter.project_slug }}.py`:
 - **Startup/Shutdown:** Initialize and clean up resources.
+
 and the following API endpoints as applicable:
 - **full_scan:** Request for full repository scan.
 - **item_action:** Execute remediation actions on a file.
@@ -41,9 +41,9 @@ invoke release
 
 Other invoke options:
 * bump - increments the patch version in version.py (e.g., 1.0.0 to 1.0.1).
-* clean - removes the distribution folder (dist/{{ cookiecutter.__release_name__ }}-<version>) and its associated zip file if they exist.
-* prepare - prepares files for a versioned build.  Copies and moves file into dist/{{ cookiecutter.__release_name__ }}-<version>; generates requirements.txt.
-* build - (runs bump, clean, prepare) and builds a Docker image tagged as {{ cookiecutter.__release_name__ }}:<version> from the prepared dist folder if it doesn’t already exist.
+* clean - removes the distribution folder (dist/{{ cookiecutter.__release_name }}-<version>) and its associated zip file if they exist.
+* prepare - prepares files for a versioned build.  Copies and moves file into dist/{{ cookiecutter.__release_name }}-<version>; generates requirements.txt.
+* build - (runs bump, clean, prepare) and builds a Docker image tagged as {{ cookiecutter.__release_name }}:<version> from the prepared dist folder if it doesn’t already exist.
 * push - (runs build) tags the Docker image with the repository username ({{ cookiecutter.docker_repo }}/<name>:<version>) and pushes it to Docker Hub.
 * release - executes the full release cycle by running the following tasks in order: bump, clean, prepare, build, and push.
 

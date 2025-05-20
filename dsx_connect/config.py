@@ -26,16 +26,23 @@ class DatabaseConfig(BaseSettings):
     loc: str = "data/dsx-connect.db.json"
     retain: int = 1000
 
+    scan_stats_db: str = "data/scan-stats.db.json"
+
     class Config:
         env_nested_delimiter = "__"
 
 
 class ScannerConfig(BaseSettings):
     # scan_binary_url: str = "http://a668960fee4324868b4154722ad9a909-856481437.us-east-1.elb.amazonaws.com/scan/binary/v2"
-    scan_binary_url: str = "https://localhost/scan/binary/v2"
+    scan_binary_url: str = "http://0.0.0.0:8080/scan/binary/v2"
 
     class Config:
         env_nested_delimiter = "__"
+
+
+class ScanResultTaskWorkerConfig(BaseSettings):
+    syslog_server_url: str = "127.0.0.1"
+    syslog_server_port: int = 514
 
 
 class TaskQueueConfig(BaseSettings):
@@ -62,9 +69,11 @@ class DSXConnectConfig(BaseSettings):
     scanner: ScannerConfig = ScannerConfig()
     taskqueue: TaskQueueConfig = TaskQueueConfig()
 
+    scan_result_task_worker: ScanResultTaskWorkerConfig = ScanResultTaskWorkerConfig()
+
     class Config:
         env_nested_delimiter = "__"
-        env_prefix = "DSXCONNECT__"
+        env_prefix = "DSXCONNECT_"
 
 
 # Singleton with reload capability

@@ -34,14 +34,13 @@ def database_scan_results_factory(database_type: str = 'tinydb',
 
 def database_scan_stats_factory(database_type: str = 'tinydb',
                                 database_loc: str = 'data',
-                                retain: int = -1,
                                 collection_name: str = 'scan_stats'):
     scan_stats_db = None
     if database_type == ConfigDatabaseType.TINYDB:
-        scan_stats_db = ScanStatsTinyDB(database_loc, collection_name=collection_name, retain=retain)
-        dsx_logging.debug(f'Scan stats TinyDB database initialized at: {database_loc} Retention policy: {retain}')
+        scan_stats_db = ScanStatsTinyDB(database_loc, collection_name=collection_name)
+        dsx_logging.debug(f'Scan stats TinyDB database initialized at: {database_loc}')
     else:
-        scan_stats_db = ScanStatsCollection(retain=retain)
-        dsx_logging.debug(f'Scan stats collection in memory. Retention policy: {retain}')
+        scan_stats_db = ScanStatsCollection()
+        dsx_logging.debug(f'Scan stats collection in memory.')
 
     return scan_stats_db

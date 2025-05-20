@@ -13,10 +13,11 @@ from dsx_connect.utils.logging import dsx_logging
 from dsx_connect.models.responses import StatusResponse, StatusResponseEnum
 from filesystem_monitor import FilesystemMonitor, FilesystemMonitorCallback, ScanFolderModel
 from dsx_connect.utils.async_ops import run_async
-from connectors.filesystem.config import config
+from connectors.filesystem.config import ConfigManager
 from connectors.filesystem.version import CONNECTOR_VERSION
 
-# config = FilesystemConnectorConfig()
+# Reload config to pick up environment variables
+config = ConfigManager.reload_config()
 
 random_number_id = random.randint(0, 9999)
 connector_id = f'filesystem-connector-{random_number_id:04d}'
@@ -34,20 +35,24 @@ async def startup():
     """
     Create a filesystem monitor and capture the file information to send to the webhook/event.
     """
-    class MonitorCallback(FilesystemMonitorCallback):
-        def __init__(self):
-            super().__init__()
+    if config.monitor:
+        class MonitorCallback(FilesystemMonitorCallback):
+            def __init__(self):
+                super().__init__()
 
-        def file_modified_callback(self, file_path: pathlib.Path):
-            dsx_logging.debug(f'Sending scan request for {file_path}')
-            run_async(connector.scan_file_request(ScanRequestModel(location=str(file_path), metainfo=file_path.name)))
+            def file_modified_callback(self, file_path: pathlib.Path):
+                dsx_logging.debug(f'Sending scan request for {file_path}')
+                run_async(connector.scan_file_request(ScanRequestModel(location=str(file_path), metainfo=file_path.name)))
 
-    monitor_callback = MonitorCallback()
+        monitor_callback = MonitorCallback()
 
-    connector.filesystem_monitor = FilesystemMonitor(
-        monitor_folder=ScanFolderModel(folder=config.location, recursive=config.recursive, scan_existing=False),
-        callback=monitor_callback)
-    connector.filesystem_monitor.start()
+        connector.filesystem_monitor = FilesystemMonitor(
+            monitor_folder=ScanFolderModel(folder=config.location, recursive=config.recursive, scan_existing=False),
+            callback=monitor_callback)
+        connector.filesystem_monitor.start()
+        dsx_logging.info(f"Monitor set on {config.location} for new or modified files")
+    else:
+        dsx_logging.info(f"Monitor set to false, {config.location} will not be monitored for new or modified files")
 
 
 @connector.startup
@@ -138,8 +143,25 @@ def read_file_handler(scan_request_info: ScanRequestModel) -> StreamingResponse 
 
 
 @connector.repo_check
-def repo_check_handler():
-    return os.path.exists(config.location)
+def repo_check_handler() -> StatusResponse:
+    """
+    Repository connectivity check handler.
+
+    This handler verifies that the configured repository location exists and this DSX Connector can connect to it.
+
+    Returns:
+        bool: True if the repository connectivity OK, False otherwise.
+    """
+    if os.path.exists(config.location):
+        return StatusResponse(
+            status=StatusResponseEnum.SUCCESS,
+            message=f"{config.location} connectivity success.")
+    else:
+        return StatusResponse(
+            status=StatusResponseEnum.ERROR,
+            message=f"Repo check failed for {config.location}",
+            description="")
+
 
 # Add the distribution root (directory containing this script) to sys.path
 # dist_root = pathlib.Path(__file__).resolve().parent.parent

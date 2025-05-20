@@ -33,6 +33,7 @@ import httpx
 from celery.signals import worker_process_init
 from pydantic import ValidationError
 
+from dsx_connect.database.scan_stats_worker import ScanStatsWorker
 from dsx_connect.dsxa_client.verdict_models import DPAVerdictEnum, DPAVerdictModel2
 from dsx_connect.models.constants import ConnectorEndpoints
 from dsx_connect.database.scan_results_base_db import ScanResultsBaseDB
@@ -40,12 +41,12 @@ from dsx_connect.database.scan_stats_base_db import ScanStatsBaseDB
 from dsx_connect.dsxa_client.dsxa_client import DSXAClient, DSXAScanRequest
 from dsx_connect.models.connector_models import ScanRequestModel
 from dsx_connect.models.responses import StatusResponse, StatusResponseEnum
-from dsx_connect.models.scan_models import ScanResultModel, ScanResultStatusEnum
+from dsx_connect.models.scan_models import ScanResultModel, ScanResultStatusEnum, ScanStatsModel
 from dsx_connect.taskqueue.celery_app import celery_app
-from dsx_connect.config import config, DatabaseConfig
-import logging
+from dsx_connect.config import DatabaseConfig, ConfigDatabaseType
+from dsx_connect.utils.logging import dsx_logging
+from dsx_connect.config import ConfigManager
 
-dpx_logging = logging.getLogger(__name__)
 
 # Shared client pools and scan client per worker process
 _connector_clients: Dict[str, httpx.Client] = {}
@@ -53,7 +54,10 @@ _connector_clients: Dict[str, httpx.Client] = {}
 _client_pool_lock = threading.Lock()
 _redis_client = None
 _scan_results_db: Optional[ScanResultsBaseDB] = None  # Assuming initialized via database_scan_results_factory
-_scan_stats_db: Optional[ScanStatsBaseDB] = None  # Assuming initialized via database_scan_results_factory
+_scan_stats_db: Optional[ScanStatsBaseDB] = None  # Assuming initialized via database_scan_stats_factory
+_scan_stats_worker: Optional[ScanStatsWorker] = None  # Assuming initialized via passing _scan_stats_db
+
+config = ConfigManager.reload_config()
 
 def get_connector_client(connector_url: str) -> httpx.Client:
     """
@@ -69,7 +73,7 @@ def get_connector_client(connector_url: str) -> httpx.Client:
     with _client_pool_lock:
         if connector_url not in _connector_clients:
             _connector_clients[connector_url] = httpx.Client(verify=False)
-            dpx_logging.debug(f"Created new httpx.Client for {connector_url}")
+            dsx_logging.debug(f"Created new httpx.Client for {connector_url}")
         return _connector_clients[connector_url]
 
 
@@ -78,11 +82,12 @@ def init_worker(**kwargs):
     """Initialize shared httpx.Client for scan requests and empty connector client pool."""
     global _connector_clients
     global _scan_results_db
+    global _scan_stats_db
+    global _scan_stats_worker
     _connector_clients = {}
-    dpx_logging.debug("Initialized shared httpx.Client for scan requests and empty connector pool")
+    dsx_logging.debug("Initialized shared httpx.Client for scan requests and empty connector pool")
 
-    # Initialize database (restore your original logic)
-    from database.database_factory import database_scan_results_factory
+    from dsx_connect.database.database_factory import database_scan_results_factory
     db_config = DatabaseConfig()
     _scan_results_db = database_scan_results_factory(
         database_type=db_config.type,
@@ -90,16 +95,17 @@ def init_worker(**kwargs):
         retain=db_config.retain,
         collection_name="scan_results"
     )
-    dpx_logging.info(f"Initialized scan results database of type {db_config.type} at {db_config.loc}")
+    dsx_logging.info(f"Initialized scan results database of type {db_config.type} at {db_config.loc}")
 
-    from database.database_factory import database_scan_stats_factory
+    from dsx_connect.database.database_factory import database_scan_stats_factory
+    from dsx_connect.database.scan_stats_worker import ScanStatsWorker
     _scan_stats_db = database_scan_stats_factory(
-        database_type=db_config.type,
-        database_loc=db_config.loc,
-        retain=db_config.retain,
-        collection_name="scan_results"
+        database_type=ConfigDatabaseType.TINYDB,
+        database_loc=db_config.scan_stats_db,
+        collection_name="scan_stats"
     )
-    dpx_logging.debug("Initialized shared httpx.Client and database")
+    _scan_stats_worker = ScanStatsWorker(_scan_stats_db)
+    dsx_logging.debug("Initialized shared httpx.Client and database")
 
     # By initializing syslog inside init_worker, each worker process gets its own syslog handler, ensuring thread/process
     # safety in the event there is more than one worker/concurrency
@@ -132,14 +138,14 @@ def scan_request_task(scan_request_dict: dict) -> dict:
         None: All exceptions are caught and converted to error responses.
     """
     task_id = scan_request_task.request.id if hasattr(scan_request_task, 'request') else None
-    dpx_logging.debug(f"Process task id: {task_id}")
+    dsx_logging.debug(f"Process task id: {task_id}")
 
     # 1. Validate and parse scan request
     try:
         scan_request = ScanRequestModel(**scan_request_dict)
-        dpx_logging.debug(f"Processing scan request for {scan_request.location} with {scan_request.connector_url}")
+        dsx_logging.debug(f"Processing scan request for {scan_request.location} with {scan_request.connector_url}")
     except ValidationError as e:
-        dpx_logging.error(f"Failed to validate scan request: {e}", exc_info=True)
+        dsx_logging.error(f"Failed to validate scan request: {e}", exc_info=True)
         return StatusResponse(
             status=StatusResponseEnum.ERROR,
             message="Invalid scan request data",
@@ -157,9 +163,9 @@ def scan_request_task(scan_request_dict: dict) -> dict:
         response.raise_for_status()  # Raises HTTPError for 4xx/5xx responses
         bytes_content = BytesIO(response.content)
         bytes_content.seek(0)
-        dpx_logging.debug(f"Received {bytes_content.getbuffer().nbytes} bytes")
+        dsx_logging.debug(f"Received {bytes_content.getbuffer().nbytes} bytes")
     except httpx.HTTPError as e:
-        dpx_logging.error(f"Failed to fetch file from connector: {e}", exc_info=True)
+        dsx_logging.error(f"Failed to fetch file from connector: {e}", exc_info=True)
         return StatusResponse(
             status=StatusResponseEnum.ERROR,
             message="Failed to fetch file from connector",
@@ -167,7 +173,7 @@ def scan_request_task(scan_request_dict: dict) -> dict:
             id=task_id
         ).model_dump()
     except Exception as e:
-        dpx_logging.error(f"Unexpected error while fetching file: {e}", exc_info=True)
+        dsx_logging.error(f"Unexpected error while fetching file: {e}", exc_info=True)
         return StatusResponse(
             status=StatusResponseEnum.ERROR,
             message="Unexpected error while fetching file",
@@ -187,9 +193,9 @@ def scan_request_task(scan_request_dict: dict) -> dict:
                 metadata_info=metadata_info
             )
         )
-        dpx_logging.debug(f"Verdict: {dpa_verdict.verdict}")
+        dsx_logging.debug(f"Verdict: {dpa_verdict.verdict}")
     except Exception as e:
-        dpx_logging.error(f"Scan failed: {e}", exc_info=True)
+        dsx_logging.error(f"Scan failed: {e}", exc_info=True)
         return StatusResponse(
             status=StatusResponseEnum.ERROR,
             message="Failed to scan file",
@@ -205,7 +211,7 @@ def scan_request_task(scan_request_dict: dict) -> dict:
             queue=config.taskqueue.verdict_action_queue,
             args=[scan_request_dict, dpa_verdict.model_dump(), task_id]
         )
-        dpx_logging.debug(f"Sent verdict for {scan_request.location} to {config.taskqueue.verdict_action_queue} with task_id {task1.id}")
+        dsx_logging.debug(f"Sent verdict for {scan_request.location} to {config.taskqueue.verdict_action_queue} with task_id {task1.id}")
 
         # Send to scan_result_queue for persistent storage
         task2 = celery_app.send_task(
@@ -213,10 +219,10 @@ def scan_request_task(scan_request_dict: dict) -> dict:
             queue=config.taskqueue.scan_result_queue,
             args=[scan_request_dict, dpa_verdict.model_dump(), task_id]
         )
-        dpx_logging.debug(f"Sent scan result for {scan_request.location} to {config.taskqueue.scan_result_queue} with task_id {task2.id}")
+        dsx_logging.debug(f"Sent scan result for {scan_request.location} to {config.taskqueue.scan_result_queue} with task_id {task2.id}")
 
     except Exception as e:
-        dpx_logging.error(f"Scan or queue dispatch failed: {e}", exc_info=True)
+        dsx_logging.error(f"Scan or queue dispatch failed: {e}", exc_info=True)
         return StatusResponse(
             status=StatusResponseEnum.ERROR,
             message=f"Failed to send scan result to queue {config.taskqueue.verdict_action_queue} and/or {config.taskqueue.scan_result_queue}",
@@ -225,11 +231,11 @@ def scan_request_task(scan_request_dict: dict) -> dict:
         ).model_dump()
 
     # 5. Return success response
-    dpx_logging.info(f"Scan completed for {scan_request.location}")
+    dsx_logging.info(f"Scan completed for {scan_request.location}")
     return StatusResponse(
         status=StatusResponseEnum.SUCCESS,
         message=f"Scan completed for {scan_request.location}",
-        description=f"Complete scan information: {scan_request}; sent verdict to verdict queue with task_id: {task.id}; verdict {dpa_verdict}",
+        description=f"Complete scan information: {scan_request}; sent verdict to verdict queue with task_id: {task1.id}; verdict {dpa_verdict}",
         id=task_id
     ).model_dump()
 
@@ -254,14 +260,14 @@ def verdict_action_task(scan_request_dict: dict, verdict_dict: dict, original_ta
         None: All exceptions are caught and converted to error responses.
     """
     verdict_task_id = verdict_action_task.request.id if hasattr(verdict_action_task, 'request') else None
-    dpx_logging.debug(f"Processing verdict task {verdict_task_id} from origin scan task {original_task_id}")
+    dsx_logging.debug(f"Processing verdict task {verdict_task_id} from origin scan task {original_task_id}")
     # 1. Validate and parse scan request and verdict
     try:
         scan_request = ScanRequestModel(**scan_request_dict)
         verdict = DPAVerdictModel2(**verdict_dict)
-        dpx_logging.debug(f"Processing {scan_request} for scan verdict: {verdict}")
+        dsx_logging.debug(f"Processing {scan_request} for scan verdict: {verdict}")
     except ValidationError as e:
-        dpx_logging.error(f"Failed to validate scan request or verdict: {e}", exc_info=True)
+        dsx_logging.error(f"Failed to validate scan request or verdict: {e}", exc_info=True)
         return StatusResponse(
             status=StatusResponseEnum.ERROR,
             message="Invalid scan request or verdict data",
@@ -275,7 +281,7 @@ def verdict_action_task(scan_request_dict: dict, verdict_dict: dict, original_ta
             # verdict.verdict_details.severity and
             # verdict.severity >= SecurityConfig().action_severity_threshold):
         # dpx_logging.info(f"Verdict is MALICIOUS with severity {verdict.severity} >= threshold {SecurityConfig().action_severity_threshold}, calling item_action")
-        dpx_logging.info(f"Verdict is MALICIOUS, calling item_action")
+        dsx_logging.info(f"Verdict is MALICIOUS, calling item_action")
         try:
             client = get_connector_client(scan_request.connector_url)
             response = client.post(
@@ -283,16 +289,16 @@ def verdict_action_task(scan_request_dict: dict, verdict_dict: dict, original_ta
                 json=scan_request.model_dump()
             )
             response.raise_for_status()
-            dpx_logging.info(f"Item action triggered successfully for {scan_request.location}")
+            dsx_logging.info(f"Item action triggered successfully for {scan_request.location}")
         except httpx.HTTPError as e:
-            dpx_logging.error(f"Item action failed for {scan_request.location}: {e}", exc_info=True)
+            dsx_logging.error(f"Item action failed for {scan_request.location}: {e}", exc_info=True)
             # Continue processing even if item_action fails
         except Exception as e:
-            dpx_logging.error(f"Unexpected error during item_action for {scan_request.location}: {e}", exc_info=True)
+            dsx_logging.error(f"Unexpected error during item_action for {scan_request.location}: {e}", exc_info=True)
             # Continue processing even if item_action fails
 
     # 3. Return success response
-    dpx_logging.info(f"Verdict processed for {scan_request.location}")
+    dsx_logging.info(f"Verdict processed for {scan_request.location}")
     return StatusResponse(
         status=StatusResponseEnum.SUCCESS,
         message=f"Verdict processed for {scan_request.location}",
@@ -326,9 +332,9 @@ def scan_result_task(scan_request_dict: dict, verdict_dict: dict, original_task_
     try:
         scan_request: ScanRequestModel = ScanRequestModel(**scan_request_dict)
         dpa_verdict = DPAVerdictModel2(**verdict_dict)
-        dpx_logging.debug(f"Processing scan result for {scan_request.location} (task_id: {task_id}) (original task id: {original_task_id} ")
+        dsx_logging.debug(f"Processing scan result for {scan_request.location} (task_id: {task_id}) (original task id: {original_task_id} ")
     except ValidationError as e:
-        dpx_logging.error(f"Failed to validate scan result: {e}", exc_info=True)
+        dsx_logging.error(f"Failed to validate scan result: {e}", exc_info=True)
         return StatusResponse(
             status=StatusResponseEnum.ERROR,
             message="Invalid scan result data",
@@ -345,38 +351,32 @@ def scan_result_task(scan_request_dict: dict, verdict_dict: dict, original_task_
             dpa_verdict=dpa_verdict.model_dump()
         )
         _scan_results_db.insert(scan_result)
-        dpx_logging.info(f"Stored scan result for {scan_request.location} in database")
+        dsx_logging.info(f"Stored scan result for {scan_request.location} in database")
+
+        _scan_stats_worker.insert(scan_result)
+        dsx_logging.info(f"Stored scan stats for {scan_request.location} in database")
 
     except Exception as e:
-        dpx_logging.error(f"Failed to store scan result: {e}", exc_info=True)
+        dsx_logging.error(f"Failed to store scan result: {e}", exc_info=True)
         return StatusResponse(
             status=StatusResponseEnum.ERROR,
             message="Failed to store scan result",
-            description=str(e),
-            task_id=task_id
+            description=f"str(e) for task_id= {task_id}",
         ).model_dump()
+
+    from dsx_connect.utils.log_chain import log_verdict_chain
+
+    # After _scan_results_db.insert(scan_result)
+    log_verdict_chain(
+        scan_request=scan_request,
+        verdict=dpa_verdict,
+        item_action_success=True,
+        original_task_id=original_task_id,
+        current_task_id=task_id
+    )
 
     return StatusResponse(
         status=StatusResponseEnum.SUCCESS,
         message=f"Scan result stored for {scan_request.location}",
-        description=f"Scan result: {scan_result}",
-        task_id=task_id
+        description=f"Scan result: {scan_result} for task_id= {task_id}"
     ).model_dump()
-
-
-if __name__ == "__main__":
-    # Sample data for scan_request_task
-    sample_scan_request = {
-        "location": "file.txt",
-        "metainfo": "test scan",
-        "connector_url": "http://example.com"
-    }
-
-    # Configure and run the Celery worker
-    dpx_logging.info("Starting Celery worker for debugging...")
-    celery_app.worker_main([
-        "worker",
-        "--loglevel=info",
-        f"--queues={config.taskqueue.scan_request_queue},{config.taskqueue.verdict_action_queue},{config.taskqueue.scan_result_queue}",
-        "--concurrency=1"
-    ])

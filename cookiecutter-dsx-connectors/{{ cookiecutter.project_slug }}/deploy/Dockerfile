@@ -11,7 +11,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY connectors/framework connectors/framework
 COPY connectors/{{ cookiecutter.project_slug }} connectors/{{ cookiecutter.project_slug }}
 COPY dsx_connect/ dsx_connect/
-COPY utils/ utils/
 COPY start.py .
 
 ENV PYTHONPATH=/app

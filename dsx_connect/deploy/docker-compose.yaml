@@ -28,6 +28,9 @@ services:
       - PYTHONUNBUFFERED=1
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - DSXCONNECT_SCANNER__SCAN_BINARY_URL=http://a668960fee4324868b4154722ad9a909-856481437.us-east-1.elb.amazonaws.com/scan/binary/v2
+      - DSXCONNECT_SCAN_RESULT_TASK_WORKER__SYSLOG_IP=127.0.0.1
+      - DSXCONNECT_SCAN_RESULT_TASK_WORKER__SYSLOG_PORT=514
     depends_on:
       - redis
     networks:

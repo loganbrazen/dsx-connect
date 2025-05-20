@@ -1,15 +1,21 @@
 import logging
 import logging.handlers
 import json
+import socket
 from datetime import datetime
-from typing import Optional
-from dpa_client.dpa_models import DPAVerdictModel2
-from dsx_connect.models import ScanRequestModel
 
-dpx_logging = logging.getLogger(__name__)
+from typing import Optional
+
+from dsx_connect.config import SecurityConfig
+from dsx_connect.dsxa_client.verdict_models import DPAVerdictEnum
+from dsx_connect.models.scan_models import DPAVerdictModel2
+from dsx_connect.models.connector_models import ScanRequestModel
+
+dsx_logging = logging.getLogger(__name__)
 
 # Syslog handler (initialized once per worker process)
 _syslog_handler = None
+
 
 def init_syslog_handler(syslog_host: str = "localhost", syslog_port: int = 514):
     """Initialize the syslog handler for the worker process."""
@@ -21,9 +27,10 @@ def init_syslog_handler(syslog_host: str = "localhost", syslog_port: int = 514):
             socktype=socket.SOCK_DGRAM  # UDP for syslog
         )
         _syslog_handler.setFormatter(logging.Formatter('%(message)s'))
-        dpx_logging.info(f"Initialized syslog handler for {syslog_host}:{syslog_port}")
+        dsx_logging.info(f"Initialized syslog handler for {syslog_host}:{syslog_port}")
     except Exception as e:
-        dpx_logging.error(f"Failed to initialize syslog handler: {e}")
+        dsx_logging.error(f"Failed to initialize syslog handler: {e}")
+
 
 def log_verdict_chain(
         scan_request: ScanRequestModel,
@@ -44,7 +51,7 @@ def log_verdict_chain(
     """
     global _syslog_handler
     if not _syslog_handler:
-        dpx_logging.warning("Syslog handler not initialized, skipping log")
+        dsx_logging.warning("Syslog handler not initialized, skipping log")
         return
 
     try:
@@ -55,8 +62,8 @@ def log_verdict_chain(
             "scan_request": scan_request.model_dump(),
             "verdict": verdict.model_dump(),
             "item_action": {
-                "triggered": verdict.verdict == DPAVerdictEnum.MALICIOUS and verdict.severity and verdict.severity >= SecurityConfig().action_severity_threshold,
-                "success": item_action_success if verdict.verdict == DPAVerdictEnum.MALICIOUS and verdict.severity else None
+                "triggered": verdict.verdict == DPAVerdictEnum.MALICIOUS,
+                "success": item_action_success if verdict.verdict == DPAVerdictEnum.MALICIOUS else None
             }
         }
         syslog_message = json.dumps(log_data)
@@ -64,6 +71,6 @@ def log_verdict_chain(
         logger.setLevel(logging.INFO)
         logger.addHandler(_syslog_handler)
         logger.info(syslog_message)
-        dpx_logging.debug(f"Sent verdict chain to syslog: {syslog_message}")
+        dsx_logging.debug(f"Sent verdict chain to syslog: {syslog_message}")
     except Exception as e:
-        dpx_logging.error(f"Failed to log verdict chain to syslog: {e}", exc_info=True)
+        dsx_logging.error(f"Failed to log verdict chain to syslog: {e}", exc_info=True)

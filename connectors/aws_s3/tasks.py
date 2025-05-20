@@ -12,12 +12,12 @@ import shutil
 from invoke import task, run
 from version import CONNECTOR_VERSION
 
-name = '{{ cookiecutter.__release_name__ }}'
+name = 'aws-s3-connector'
 version = CONNECTOR_VERSION.strip()
 build_dir = "dist"
 export_folder = os.path.join(build_dir, f"{name}-{version}")
 project_root_dir = str(pathlib.Path(__file__).resolve().parent.parent.parent)
-repo_uname = "{{ cookiecutter.docker_repo }}"
+repo_uname = "logangilbert"
 
 @task
 def bump(c):
@@ -61,19 +61,20 @@ def clean(c):
 def prepare(c):
     """Prepare distribution folder with necessary files."""
     print(f"Preparing release files for version {version}...")
-    c.run(f"mkdir -p {export_folder}/connectors/filesystem")
+    c.run(f"mkdir -p {export_folder}/connectors/aws_s3")
     c.run(f"mkdir -p {export_folder}/dsx_connect/models")
-    c.run(f"mkdir -p {export_folder}/utils")
+    c.run(f"mkdir -p {export_folder}/dsx_connect/utils")
 
     # Copy connectors
-    c.run(f"rsync -av --exclude '__pycache__' {project_root_dir}/connectors/filesystem/ {export_folder}/connectors/filesystem/ --exclude 'deploy' --exclude 'dist' --exclude 'tasks.py'")
+    c.run(f"rsync -av --exclude '__pycache__' {project_root_dir}/connectors/aws_s3/ {export_folder}/connectors/aws_s3/ --exclude 'deploy' --exclude 'dist' --exclude 'tasks.py'")
     c.run(f"rsync -av --exclude '__pycache__' {project_root_dir}/connectors/framework/ {export_folder}/connectors/framework/")
 
     # Copy dsx_connect/models
     c.run(f"rsync -av --exclude '__pycache__' {project_root_dir}/dsx_connect/models/ {export_folder}/dsx_connect/models/")
 
-    # Copy utils
-    c.run(f"rsync -av --include '__init__.py' --include 'logging.py' --include 'async_ops.py' --include 'file_ops.py' --exclude '*' {project_root_dir}/utils/ {export_folder}/utils/")
+
+    # Copy dsx_connect/utils
+    c.run(f"rsync -av --exclude '__pycache__' {project_root_dir}/dsx_connect/utils/ {export_folder}/dsx_connect/utils/")
 
     # Copy top-level __init__.py
     # c.run(f"touch {export_folder}/__init__.py")
@@ -87,69 +88,8 @@ def prepare(c):
     c.run(f"pipreqs {export_folder} --force --savepath {export_folder}/requirements.txt")
 
     # move Dockerfile and docker-compose to topmost directory
-    c.run(f"rsync -av {project_root_dir}/connectors/filesystem/deploy/ {export_folder}")
+    c.run(f"rsync -av {project_root_dir}/connectors/aws_s3/deploy/ {export_folder}")
 
-#     # Generate Dockerfile
-#     with open(f"{export_folder}/Dockerfile", "w") as f:
-#         f.write('''FROM python:3.12-slim
-#
-# # Create a non-root user
-# RUN useradd -m appuser
-#
-# WORKDIR /app
-#
-# COPY requirements.txt .
-# RUN pip install --no-cache-dir -r requirements.txt
-#
-# RUN mkdir quarantine
-# RUN mkdir scan_folder
-#
-# COPY connectors/ connectors/
-# COPY dsx_connect/ dsx_connect/
-# COPY utils/ utils/
-# COPY start.py .
-#
-# ENV PYTHONPATH=/app
-#
-# USER appuser
-#
-# # Command is set in docker-compose.yaml
-# ''')
-#
-#     # Generate docker-compose.yaml
-#     with open(f"{export_folder}/docker-compose.yaml", "w") as f:
-#         f.write('''services:
-#   filesystem_connector:
-#     build:
-#       context: .
-#       dockerfile: Dockerfile
-#     ports:
-#       - "8590:8590"
-#     volumes:
-#       - /Users/logangilbert/Documents/SAMPLES/PDF:/app/scan_folder  # this directory should have been created in the Dockerfile
-#     environment:
-#       - PYTHONUNBUFFERED=1
-#       - DSXCONNECTOR_CONNECTOR_URL=http://filesystem-connector-api:8590 # see aliases below
-#       - DSXCONNECTOR_DSX_CONNECT_URL=http://dsx-connect-api:8586 # note, this works if running on the same internal network on Docker as the dsx_connect_core...
-#       - DSXCONNECTOR_LOCATION=/app/scan_folder
-#       - LOG_LEVEL=debug
-#       - DSXCONNECTOR_ITEM_ACTION=nothing
-#       - DSXCONNECTOR_ITEM_ACTION_MOVE_DIR=/app/quarantine # this directory should have been created in the Dockerfile
-#       - DSXCONNECTOR_RECURSIVE=true
-#     networks:
-#       dsx-network:
-#         aliases:
-#           - filesystem-connector-api  # this is how dsx-connect will communicate with this on the network
-#     command:
-#       python connectors/filesystem/filesystem_connector.py
-#
-# # The following assumes an already created docker network like this:
-# # docker network create dsx-connect-network --driver bridge
-# networks:
-#     dsx-network:
-#       external: true
-#       name: dsx-connect-network  # change this to an existing docker network
-# ''')
 
 @task(pre=[prepare])
 def build(c):

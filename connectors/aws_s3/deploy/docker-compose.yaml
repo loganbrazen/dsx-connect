@@ -1,0 +1,29 @@
+services:
+  filesystem_connector:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8591:8591"
+    volumes:
+      - /Users/logangilbert/Documents/0:/app/scan_folder  # this directory should have been created in the Dockerfile
+    environment:
+      - PYTHONUNBUFFERED=1
+      - LOG_LEVEL=debug
+      - DSXCONNECTOR_CONNECTOR_URL=http://aws-s3-connector-api:8591 # see aliases below
+      - DSXCONNECTOR_DSX_CONNECT_URL=http://dsx-connect-api:8586 # note, this works if running on the same internal network on Docker as the dsx_connect_core...
+      - DSXCONNECTOR_LOCATION=/app/scan_folder
+      - DSXCONNECTOR_ITEM_ACTION=nothing
+    networks:
+      dsx-network:
+        aliases:
+          - filesystem-connector-api  # this is how dsx-connect will communicate with this on the network
+    command:
+      python connectors/aws_s3/aws_s3_connector.py
+
+# The following assumes an already created docker network like this:
+# docker network create dsx-connect-network --driver bridge
+networks:
+    dsx-network:
+      external: true
+      name: dsx-connect-network  # change this to an existing docker network

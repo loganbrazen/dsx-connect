@@ -1,24 +1,27 @@
-from random import random
+import random
 
 from starlette.responses import StreamingResponse
 
+from connectors.framework.dsx_connector import DSXConnector
 from dsx_connect.utils import file_ops
 from dsx_connect.models.connector_models import ScanRequestModel
 from dsx_connect.utils.logging import dsx_logging
 from dsx_connect.models.responses import StatusResponse, StatusResponseEnum
-from connectors.filesystem.config import config
-from connectors.filesystem.version import CONNECTOR_VERSION
+from connectors.{{ cookiecutter.project_slug }}.config import ConfigManager
+from connectors.{{ cookiecutter.project_slug }}.version import CONNECTOR_VERSION
 
 random_number_id = random.randint(0, 9999)
-connector_id = f'filesystem-connector-{random_number_id:04d}'
+connector_id = f'{{ cookiecutter.__release_name }}-{random_number_id:04d}'
 
-# Initialize DSXA Connector instance
-connector = DSXAConnector(connector_name=config.name,
-                          connector_id=connector_id,
-                          base_connector_url=config.connector_url,
-                          dsxa_connect_url=config.dsx_connect_url,
-                          test_mode=True)
+# Reload config to pick up environment variables
+config = ConfigManager.reload_config()
 
+# Initialize DSX Connector instance
+connector = DSXConnector(connector_name=config.name,
+                         connector_id=connector_id,
+                         base_connector_url=config.connector_url,
+                         dsx_connect_url=config.dsx_connect_url,
+                         test_mode=True)
 
 async def startup():
     """
@@ -44,11 +47,10 @@ async def startup_event():
     dsx_logging.info(f"{connector.connector_id} configuration: {config}.")
     dsx_logging.info(f"{connector.connector_name}:{connector.connector_id} startup completed.")
 
-    return True
 
 
 @connector.shutdown
-def shutdown_event():
+async def shutdown_event():
     """
     Shutdown handler for the DSX Connector.
 
@@ -64,9 +66,9 @@ def shutdown_event():
 @connector.full_scan
 async def full_scan_handler() -> StatusResponse:
     """
-    Full Scan handler for the DSXA Connector.
+    Full Scan handler for the DSX Connector.
 
-    This function is invoked by DSXA Connect when a full scan of the connector's repository is requested.
+    This function is invoked by DSX Connect when a full scan of the connector's repository is requested.
     If your connector supports scanning all files (e.g., a filesystem or cloud storage connector), implement
     the logic to enumerate all files and trigger individual scan requests, using the base
     connector scan_file_request function.
@@ -95,12 +97,6 @@ async def full_scan_handler() -> StatusResponse:
         SimpleResponse: A response indicating success if the full scan is initiated, or an error if the
             functionality is not supported. (For connectors without full scan support, return an error response.)
     """
-    dsx_logging.debug(f'Scanning files at: {config.location}')
-
-    # ****  Example code  ****
-    async for file_path in file_ops.get_filepaths_async('F:/FileShare', True):
-        await connector.scan_file_request(ScanRequestModel(location=str(file_path), metainfo=file_path.name))
-
     return StatusResponse(
         status=StatusResponseEnum.NOTHING,
         message="Full scan not implemented",
@@ -175,7 +171,7 @@ def read_file_handler(scan_event_queue_info: ScanRequestModel) -> StatusResponse
 
 
 @connector.repo_check
-def repo_check_handler():
+def repo_check_handler() -> StatusResponse:
     """
     Repository connectivity check handler.
 
@@ -184,8 +180,11 @@ def repo_check_handler():
     Returns:
         bool: True if the repository connectivity OK, False otherwise.
     """
-    return True
-
+    return StatusResponse(
+        status=StatusResponseEnum.NOTHING,
+        message="Repo check not implemented",
+        description=""
+    )
 
 @connector.webhook_event
 def webhook_handler(event: dict):
@@ -220,5 +219,5 @@ def webhook_handler(event: dict):
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run("connectors.framework.dsxa_connector:connector_api", host="0.0.0.0",
+    uvicorn.run("connectors.framework.dsx_connector:connector_api", host="0.0.0.0",
                 port="{{ cookiecutter.connector_port }}", reload=True)

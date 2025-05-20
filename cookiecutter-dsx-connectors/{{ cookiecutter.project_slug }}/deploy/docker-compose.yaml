@@ -4,24 +4,22 @@ services:
       context: .
       dockerfile: Dockerfile
     ports:
-      - "8591:8591"
-    volumes:
-      - /Users/logangilbert/Documents/0:/app/scan_folder  # this directory should have been created in the Dockerfile
+      - "{{ cookiecutter.connector_port }}:{{ cookiecutter.connector_port }}"
+    #volumes:
+        # map any external folders
     environment:
       - PYTHONUNBUFFERED=1
-      - DSXCONNECTOR_CONNECTOR_URL=http://filesystem-connector-api:8590 # see aliases below
+      - LOG_LEVEL=debug
+      - DSXCONNECTOR_CONNECTOR_URL=http://{{ cookiecutter.__release_name }}-api:{{ cookiecutter.connector_port }} # see aliases below
       - DSXCONNECTOR_DSX_CONNECT_URL=http://dsx-connect-api:8586 # note, this works if running on the same internal network on Docker as the dsx_connect_core...
       - DSXCONNECTOR_LOCATION=/app/scan_folder
-      - LOG_LEVEL=debug
       - DSXCONNECTOR_ITEM_ACTION=nothing
-      - DSXCONNECTOR_ITEM_ACTION_MOVE_DIR=/app/quarantine # this directory should have been created in the Dockerfile
-      - DSXCONNECTOR_RECURSIVE=true
     networks:
       dsx-network:
         aliases:
-          - filesystem-connector-api  # this is how dsx-connect will communicate with this on the network
+          - {{ cookiecutter.__release_name }}-api  # this is how dsx-connect will communicate with this on the network
     command:
-      python connectors/filesystem/filesystem_connector.py
+      python connectors/{{ cookiecutter.project_slug }}/{{ cookiecutter.project_slug }}_connector.py
 
 # The following assumes an already created docker network like this:
 # docker network create dsx-connect-network --driver bridge
