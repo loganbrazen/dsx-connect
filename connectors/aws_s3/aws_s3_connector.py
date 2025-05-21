@@ -1,11 +1,14 @@
+import logging
 import random
+from datetime import time
 
 from starlette.responses import StreamingResponse
 
 from connectors.aws_s3.aws_s3_client import AWSS3Client
 from connectors.framework.dsx_connector import DSXConnector
 from dsx_connect.utils import file_ops
-from dsx_connect.models.connector_models import ScanRequestModel
+from dsx_connect.models.connector_models import ScanRequestModel, ItemActionEnum
+from dsx_connect.utils.async_ops import run_async
 from dsx_connect.utils.logging import dsx_logging
 from dsx_connect.models.responses import StatusResponse, StatusResponseEnum
 from connectors.aws_s3.config import ConfigManager
@@ -22,9 +25,10 @@ connector = DSXConnector(connector_name=config.name,
                          connector_id=connector_id,
                          base_connector_url=config.connector_url,
                          dsx_connect_url=config.dsx_connect_url,
-                         test_mode=True)
+                         test_mode=config.test_mode)
 
-aws_s3_client = AWSS3Client(s3_endpoint_url=config)
+aws_s3_client = AWSS3Client(s3_endpoint_url=config.s3_endpoint_url, s3_endpoint_verify=config.s3_endpoint_verify)
+
 
 async def startup():
     """
@@ -50,6 +54,7 @@ async def startup_event():
     dsx_logging.info(f"{connector.connector_id} configuration: {config}.")
     dsx_logging.info(f"{connector.connector_name}:{connector.connector_id} startup completed.")
 
+
 @connector.shutdown
 async def shutdown_event():
     """
@@ -62,7 +67,6 @@ async def shutdown_event():
         None
     """
     dsx_logging.info(f"Shutting down connector {connector.connector_id}")
-
 
 
 @connector.full_scan
@@ -99,54 +103,14 @@ async def full_scan_handler() -> StatusResponse:
         SimpleResponse: A response indicating success if the full scan is initiated, or an error if the
             functionality is not supported. (For connectors without full scan support, return an error response.)
     """
-    if dpx_logging.level == logging.DEBUG:
-        start_time = time.time()
-        dpx_logging.info(
-            f"Start scan {dpa_proxy_scan_id} on {bucket_name} subfolder {prefix}; recursive {str(recursive)} ")
-    scan_results = []
-    batch = []
-    try:
-        async for key in self._aws_bucket_worker.keys(bucket_name, prefix=prefix, recursive=recursive):
-            # Instead of calling _scan_object directly, enqueue the task
-            # task_result = scan_s3_object_task.delay(dpa_proxy_scan_id, bucket_name, key)    ## new tasking
-            # scan_results.append(task_result)  # new tasking
+    for key in aws_s3_client.keys(config.s3_bucket, prefix=config.s3_prefix, recursive=config.s3_recursive):
+        file_name = key['Key']
+        full_path = f"{config.s3_bucket}/{file_name}"
+        status_response = await connector.scan_file_request(
+            ScanRequestModel(location=str(f"{file_name}"), metainfo=full_path))
+        dsx_logging.debug(f'Sent scan request for {full_path}, result: {status_response}')
 
-            file_name = key['Key']
-            dpx_logging.debug(
-                f"New key {bucket_name}/{file_name} for scan {dpa_proxy_scan_id}, file size: {key['Size']}")
-            # scan_results.append(self._scan_object_sync(dpa_proxy_scan_id, bucket_name, file_name))
-            batch.append(asyncio.create_task(self.scan_bucket_object_async(dpa_proxy_scan_id, bucket_name, file_name)))
-            # we want to start tasks in batches, in the event that there are more keys than we could create
-            # tasks for - this is different than the semaphore in the _scan_object
-            if len(batch) >= self.aws_bucket_worker.concurrent_processing_max:
-                # Process the batch
-                dpx_logging.debug(f'Processing batch: {batch}')
-                results = await asyncio.gather(*batch)
-                scan_results.extend(results)
-                batch.clear()
-
-            # Process any remaining keys in the batch
-        if batch:
-            results = await asyncio.gather(*batch)
-            scan_results.extend(results)
-
-        # Capture the end time
-        if dpx_logging.level == logging.DEBUG:
-            end_time = time.time()
-            elapsed_time = end_time - start_time
-            elapsed_time_formatted = str(timedelta(seconds=elapsed_time))
-            dpx_logging.debug(f"Elapsed time for scan {dpa_proxy_scan_id}: {elapsed_time_formatted}")
-        return scan_results
-
-    except BaseException as e:
-        raise e
-
-
-    return StatusResponse(
-        status=StatusResponseEnum.NOTHING,
-        message="Full scan not implemented",
-        description=""
-    )
+    return StatusResponse(status=StatusResponseEnum.SUCCESS, message='Full scan invoked and scan requests sent.')
 
 
 @connector.item_action
@@ -167,9 +131,60 @@ def item_action_handler(scan_event_queue_info: ScanRequestModel) -> StatusRespon
         SimpleResponse: A response indicating that the remediation action was performed successfully,
             or an error if the action is not implemented.
     """
-    return StatusResponse(status=StatusResponseEnum.NOTHING,
-                          message=f"Item action not implemented.")
+    full_path = scan_event_queue_info.metainfo
+    if config.item_action == ItemActionEnum.NOTHING:
+        dsx_logging.debug(f'Item action {ItemActionEnum.NOTHING} on {full_path} invoked.')
+        return StatusResponse(status=StatusResponseEnum.SUCCESS, message=f'Item action {config.item_action} was invoked.')
+    elif config.item_action == ItemActionEnum.DELETE:
+        dsx_logging.debug(f'Item action {ItemActionEnum.DELETE} on {full_path} invoked.')
+        # Check if the file exists
+        if aws_s3_client.key_exists(config.s3_bucket, scan_event_queue_info.location):
+            if aws_s3_client.delete_object(config.s3_bucket, scan_event_queue_info.location):
+                return StatusResponse(status=StatusResponseEnum.SUCCESS,
+                                      message=f'Item action {config.item_action} was invoked. File {full_path} successfully deleted.')
+        return StatusResponse(status=StatusResponseEnum.ERROR,
+                              message=f'Item action {config.item_action} was invoked. Unable to delete  {full_path}.')
+    elif config.item_action == ItemActionEnum.MOVE:
+        dsx_logging.debug(f'Item action {ItemActionEnum.MOVE} on {full_path} invoked.')
+        if aws_s3_client.key_exists(config.s3_bucket, scan_event_queue_info.location):
+            aws_s3_client.move_object(src_bucket=config.s3_bucket, src_key=scan_event_queue_info.location,
+                                      dest_bucket=config.s3_bucket, dest_key=f"{config.item_action_move_prefix}/{scan_event_queue_info.location}")
+            return StatusResponse(status=StatusResponseEnum.SUCCESS,
+                                  message=f'Item action {config.item_action} was invoked. File {full_path} successfully moved to {config.item_action_move_prefix}.')
+        return StatusResponse(
+            status=StatusResponseEnum.ERROR,
+            message=f'Item action {config.item_action} was invoked, but key {full_path} not found.'
+        )
+    elif config.item_action == ItemActionEnum.TAG:
+        dsx_logging.debug(f'Item action {ItemActionEnum.TAG} on {full_path} invoked.')
+        if aws_s3_client.key_exists(config.s3_bucket, scan_event_queue_info.location):
+            aws_s3_client.tag_object(config.s3_bucket, scan_event_queue_info.location, tags={"Verdict": "Malicious"})
+            return StatusResponse(status=StatusResponseEnum.SUCCESS,
+                                  message=f'Item action {config.item_action} was invoked. File {full_path} successfully tagged.')
+        return StatusResponse(
+            status=StatusResponseEnum.ERROR,
+            message=f'Item action {config.item_action} was invoked, but key {full_path} not found.'
+        )
+    elif config.item_action == ItemActionEnum.MOVE_TAG:
+        dsx_logging.debug(f'Item action {ItemActionEnum.MOVE_TAG} on {full_path} invoked.')
+        if aws_s3_client.key_exists(config.s3_bucket, scan_event_queue_info.location):
+            dest_key = f"{config.item_action_move_prefix}/{scan_event_queue_info.location}"
 
+            aws_s3_client.move_object(src_bucket=config.s3_bucket, src_key=scan_event_queue_info.location,
+                                      dest_bucket=config.s3_bucket, dest_key=dest_key)
+
+            aws_s3_client.tag_object(config.s3_bucket, dest_key, tags={"Verdict": "Malicious"})
+
+            return StatusResponse(status=StatusResponseEnum.SUCCESS,
+                                  message=f'Item action {config.item_action} was invoked. File {full_path} successfully tagged.')
+        return StatusResponse(
+            status=StatusResponseEnum.ERROR,
+            message=f'Item action {config.item_action} was invoked, but key {full_path} not found.'
+        )
+
+
+    return StatusResponse(status=StatusResponseEnum.NOTHING,
+                          message=f"Item action {config.item_action} not implemented.")
 
 @connector.read_file
 def read_file_handler(scan_event_queue_info: ScanRequestModel) -> StatusResponse | StreamingResponse:
@@ -207,12 +222,14 @@ def read_file_handler(scan_event_queue_info: ScanRequestModel) -> StatusResponse
         FileContentResponse or SimpleResponse: A successful FileContentResponse containing the file's content,
             or a SimpleResponse with an error message if file reading is not supported.
     """
-    # Implement file read (if applicable)
-    return StatusResponse(
-        status=StatusResponseEnum.NOTHING,
-        message="Read file not implemented",
-        description=""
-    )
+    bytes_obj = aws_s3_client.get_object(bucket=config.s3_bucket, key=scan_event_queue_info.location)
+
+    # Read the file content
+    try:
+        return StreamingResponse(bytes_obj, media_type="application/octet-stream")  # Stream file
+    except Exception as e:
+        return StatusResponse(status=StatusResponseEnum.ERROR,
+                              message=f"Failed to read file: {str(e)}")
 
 
 @connector.repo_check
@@ -225,11 +242,19 @@ def repo_check_handler() -> StatusResponse:
     Returns:
         bool: True if the repository connectivity OK, False otherwise.
     """
+    if aws_s3_client.test_s3_connection(config.s3_bucket):
+        return StatusResponse(
+            status=StatusResponseEnum.SUCCESS,
+            message=f"Connection to bucket: {config.s3_bucket} successful",
+            description=""
+        )
+
     return StatusResponse(
-        status=StatusResponseEnum.NOTHING,
-        message="Repo check not implemented",
+        status=StatusResponseEnum.ERROR,
+        message=f"Connection to bucket: {config.s3_bucket} NOT successful",
         description=""
     )
+
 
 @connector.webhook_event
 def webhook_handler(event: dict):
@@ -265,4 +290,4 @@ if __name__ == "__main__":
     import uvicorn
 
     uvicorn.run("connectors.framework.dsx_connector:connector_api", host="0.0.0.0",
-                port="8591", reload=True)
+                port=8591, reload=True)

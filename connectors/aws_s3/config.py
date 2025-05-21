@@ -20,16 +20,22 @@ class AWSS3ConnectorConfig(BaseSettings):
     name: str = 'aws-s3-connector'
     connector_url: HttpUrl = Field(default="http://0.0.0.0:8591",
                                    description="Base URL (http(s)://ip.add.ddr.ess|URL:port) of this connector entry point")
-    item_action: ItemActionEnum = ItemActionEnum.NOTHING
+    item_action: ItemActionEnum = ItemActionEnum.MOVE_TAG
     dsx_connect_url: HttpUrl = Field(default="http://0.0.0.0:8586",
                                      description="Complete URL (http(s)://ip.add.ddr.ess|URL:port) of the dsxa entry point")
-    test_mode: bool = True
+    test_mode: bool = False
 
     ### Connector specific configuration
-    s3_endpoint_url: str = None
+    s3_endpoint_url: str | None = None
     s3_endpoint_verify: bool = True
+    s3_bucket: str = "lg-test-02"
+    s3_prefix: str = ""
+    s3_recursive: bool = True
+    item_action_move_prefix: str = Field(default="dsxconnect-quarantine",
+                                         description="Prefix to move files when item_action is MOVE")
 
-    class Config:
+
+class Config:
         env_prefix = "DSXCONNECTOR_"
         env_file = ".env"
         env_file_encoding = "utf-8"

@@ -8,6 +8,7 @@ class ItemActionEnum(str, Enum):
     DELETE = 'delete'
     MOVE = 'move'
     TAG = 'tag'
+    MOVE_TAG = 'movetag'
 
 
 class ItemActionModel(BaseModel):

@@ -3,8 +3,7 @@ import random
 from starlette.responses import StreamingResponse
 
 from connectors.framework.dsx_connector import DSXConnector
-from dsx_connect.utils import file_ops
-from dsx_connect.models.connector_models import ScanRequestModel
+from dsx_connect.models.connector_models import ScanRequestModel, ItemActionEnum
 from dsx_connect.utils.logging import dsx_logging
 from dsx_connect.models.responses import StatusResponse, StatusResponseEnum
 from connectors.{{ cookiecutter.project_slug }}.config import ConfigManager
@@ -21,7 +20,7 @@ connector = DSXConnector(connector_name=config.name,
                          connector_id=connector_id,
                          base_connector_url=config.connector_url,
                          dsx_connect_url=config.dsx_connect_url,
-                         test_mode=True)
+                         test_mode=config.test_mode)
 
 async def startup():
     """
@@ -220,4 +219,4 @@ if __name__ == "__main__":
     import uvicorn
 
     uvicorn.run("connectors.framework.dsx_connector:connector_api", host="0.0.0.0",
-                port="{{ cookiecutter.connector_port }}", reload=True)
+                port={{ cookiecutter.connector_port }}, reload=True)
